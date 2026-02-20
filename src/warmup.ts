@@ -38,7 +38,7 @@
  * writes a fresh value with a new TTL, maintaining a perpetual "always warm" state.
  */
 
-import { YouTrackClient, TTL_5MIN, TTL_HOUR, TTL_SESSION } from "./client.js";
+import { REFERENCE_PAGE_SIZE, TTL_5MIN, TTL_HOUR, TTL_SESSION, type YouTrackClient } from "./client.js";
 import * as F from "./fields.js";
 
 type LogFn = (level: "info" | "warning" | "error", data: string) => void;
@@ -61,9 +61,17 @@ const CURRENT_USER: WarmupEntry = {
 
 const FIVE_MIN_ENTRIES: readonly WarmupEntry[] = [
   {
+    // Warms the cache for the get_projects tool (LIST projection)
     label: "projects",
     path: "/admin/projects",
-    params: { fields: F.PROJECT_LIST, $top: 200 },
+    params: { fields: F.PROJECT_LIST, $top: REFERENCE_PAGE_SIZE },
+    ttl: TTL_5MIN,
+  },
+  {
+    // Warms the cache for the youtrack://projects resource (DETAIL projection)
+    label: "projects-detail",
+    path: "/admin/projects",
+    params: { fields: F.PROJECT_DETAIL, $top: REFERENCE_PAGE_SIZE },
     ttl: TTL_5MIN,
   },
 ];
@@ -78,21 +86,15 @@ const HOUR_ENTRIES: readonly WarmupEntry[] = [
   {
     label: "global-custom-fields",
     path: "/admin/customFieldSettings/customFields",
-    params: { fields: F.GLOBAL_CUSTOM_FIELD, $top: 200 },
+    params: { fields: F.GLOBAL_CUSTOM_FIELD, $top: REFERENCE_PAGE_SIZE },
     ttl: TTL_HOUR,
   },
   {
     label: "tags",
     path: "/tags",
-    params: { fields: F.TAG, $top: 200 },
+    params: { fields: F.TAG, $top: REFERENCE_PAGE_SIZE },
     ttl: TTL_HOUR,
   },
-];
-
-const ALL_ENTRIES: readonly WarmupEntry[] = [
-  CURRENT_USER,
-  ...FIVE_MIN_ENTRIES,
-  ...HOUR_ENTRIES,
 ];
 
 // ─── Fetch helpers ─────────────────────────────────────────────────────────
@@ -176,13 +178,22 @@ function scheduleRefreshBatch(
   intervalMs: number,
   log: LogFn,
 ): NodeJS.Timeout {
+  let running = false;
   const timer = setInterval(async () => {
-    const { failed } = await fetchBatch(client, entries);
-    if (failed.length > 0) {
-      const failSummary = failed.map(f => `${f.label}: ${f.reason}`).join("; ");
-      log("warning", `Background refresh failed: ${failSummary}`);
+    if (running) return;
+    running = true;
+    try {
+      const { failed } = await fetchBatch(client, entries);
+      if (failed.length > 0) {
+        const failSummary = failed.map(f => `${f.label}: ${f.reason}`).join("; ");
+        log("warning", `Background refresh failed: ${failSummary}`);
+      }
+      // Successful refreshes are silent — no need to pollute the log on every cycle
+    } catch (e) {
+      log("warning", `Background refresh error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      running = false;
     }
-    // Successful refreshes are silent — no need to pollute the log on every cycle
   }, intervalMs);
 
   // Do not prevent process exit if the event loop drains

@@ -1,8 +1,8 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { YouTrackClient } from "../client.js";
+import { PAGE_SIZE, type YouTrackClient } from "../client.js";
 import * as F from "../fields.js";
-import { run, READ_ONLY } from "../utils.js";
+import { enc, READ_ONLY, run } from "../utils.js";
 
 export function registerReportTools(server: McpServer, client: YouTrackClient) {
 
@@ -11,7 +11,7 @@ export function registerReportTools(server: McpServer, client: YouTrackClient) {
     description: "List YouTrack reports visible to the current user.",
     inputSchema: {
       fields: z.string().optional().describe("Custom field projection"),
-      limit: z.number().int().min(1).max(100).default(42),
+      limit: z.number().int().min(1).max(100).default(PAGE_SIZE),
       skip: z.number().int().min(0).default(0),
     },
     annotations: READ_ONLY,
@@ -29,11 +29,11 @@ export function registerReportTools(server: McpServer, client: YouTrackClient) {
       "Get a specific YouTrack report by ID. " +
       "The $type field indicates the report variant (IssueCountReport, TimeTrackingReport, etc.).",
     inputSchema: {
-      reportId: z.string().describe("Report ID"),
+      reportId: z.string().min(1).describe("Report ID"),
       fields: z.string().optional().describe("Custom field projection"),
     },
     annotations: READ_ONLY,
   }, async ({ reportId, fields }, extra) => run(() =>
-    client.get(`/reports/${reportId}`, { fields: fields ?? F.REPORT }, undefined, extra.signal)
+    client.get(`/reports/${enc(reportId)}`, { fields: fields ?? F.REPORT }, undefined, extra.signal)
   ));
 }

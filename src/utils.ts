@@ -1,11 +1,18 @@
 import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { YouTrackError } from "./errors.js";
 
+// ─── URL helpers ──────────────────────────────────────────────────────────
+
+/** Encode a value for safe inclusion in a URL path segment. */
+export function enc(value: string): string {
+  return encodeURIComponent(value);
+}
+
 // ─── Response helpers ──────────────────────────────────────────────────────
 
 /** Successful tool result with compact JSON (no whitespace = fewer tokens). */
 export function ok(data: unknown): CallToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(data) }] };
+  return { content: [{ type: "text", text: JSON.stringify(data ?? null) }] };
 }
 
 /**
@@ -46,23 +53,4 @@ export const READ_ONLY: ToolAnnotations = {
   destructiveHint: false,  // Explicitly non-destructive (implied by readOnlyHint, but stated for clarity)
   idempotentHint: true,    // Repeated calls produce the same result
   openWorldHint: true,     // Interacts with the external YouTrack instance
-};
-
-// ─── Pagination schema helpers ─────────────────────────────────────────────
-
-/**
- * Standard pagination parameters shared by all list endpoints.
- * Server hard-caps responses at ~42 entries per request.
- */
-export const PAGINATION = {
-  limit: {
-    type: "number" as const,
-    description: "Max results to return (server caps at ~42)",
-    default: 42,
-  },
-  skip: {
-    type: "number" as const,
-    description: "Results to skip for pagination",
-    default: 0,
-  },
 };

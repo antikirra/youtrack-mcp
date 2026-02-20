@@ -1,8 +1,8 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { YouTrackClient } from "../client.js";
+import { PAGE_SIZE, type YouTrackClient } from "../client.js";
 import * as F from "../fields.js";
-import { run, READ_ONLY } from "../utils.js";
+import { enc, READ_ONLY, run } from "../utils.js";
 
 export function registerAgileTools(server: McpServer, client: YouTrackClient) {
 
@@ -12,7 +12,7 @@ export function registerAgileTools(server: McpServer, client: YouTrackClient) {
       "List all Agile boards. Returns lightweight metadata — use get_agile_board for full details.",
     inputSchema: {
       fields: z.string().optional().describe("Custom field projection"),
-      limit: z.number().int().min(1).max(100).default(42),
+      limit: z.number().int().min(1).max(100).default(PAGE_SIZE),
       skip: z.number().int().min(0).default(0),
     },
     annotations: READ_ONLY,
@@ -29,12 +29,12 @@ export function registerAgileTools(server: McpServer, client: YouTrackClient) {
     description:
       "Get full details of an Agile board, including the sprint list and column configuration.",
     inputSchema: {
-      agileId: z.string().describe("Agile board ID"),
+      agileId: z.string().min(1).describe("Agile board ID"),
       fields: z.string().optional().describe("Custom field projection"),
     },
     annotations: READ_ONLY,
   }, async ({ agileId, fields }, extra) => run(() =>
-    client.get(`/agiles/${agileId}`, { fields: fields ?? F.AGILE_DETAIL }, undefined, extra.signal)
+    client.get(`/agiles/${enc(agileId)}`, { fields: fields ?? F.AGILE_DETAIL }, undefined, extra.signal)
   ));
 
   server.registerTool("get_agile_sprints", {
@@ -43,14 +43,14 @@ export function registerAgileTools(server: McpServer, client: YouTrackClient) {
       "List sprints for an Agile board (metadata only). " +
       "Use get_sprint_issues to fetch issues assigned to a sprint.",
     inputSchema: {
-      agileId: z.string().describe("Agile board ID"),
+      agileId: z.string().min(1).describe("Agile board ID"),
       fields: z.string().optional().describe("Custom field projection"),
-      limit: z.number().int().min(1).max(100).default(42),
+      limit: z.number().int().min(1).max(100).default(PAGE_SIZE),
       skip: z.number().int().min(0).default(0),
     },
     annotations: READ_ONLY,
   }, async ({ agileId, fields, limit, skip }, extra) => run(() =>
-    client.get(`/agiles/${agileId}/sprints`, {
+    client.get(`/agiles/${enc(agileId)}/sprints`, {
       fields: fields ?? F.SPRINT,
       $top: limit,
       $skip: skip,
@@ -63,13 +63,13 @@ export function registerAgileTools(server: McpServer, client: YouTrackClient) {
       "Get metadata for a specific sprint. " +
       "Use get_sprint_issues to fetch the issues within the sprint.",
     inputSchema: {
-      agileId: z.string().describe("Agile board ID"),
-      sprintId: z.string().describe("Sprint ID"),
+      agileId: z.string().min(1).describe("Agile board ID"),
+      sprintId: z.string().min(1).describe("Sprint ID"),
       fields: z.string().optional().describe("Custom field projection"),
     },
     annotations: READ_ONLY,
   }, async ({ agileId, sprintId, fields }, extra) => run(() =>
-    client.get(`/agiles/${agileId}/sprints/${sprintId}`, {
+    client.get(`/agiles/${enc(agileId)}/sprints/${enc(sprintId)}`, {
       fields: fields ?? F.SPRINT,
     }, undefined, extra.signal)
   ));
@@ -78,15 +78,15 @@ export function registerAgileTools(server: McpServer, client: YouTrackClient) {
     title: "Get Sprint Issues",
     description: "Get issues assigned to a specific sprint on an Agile board.",
     inputSchema: {
-      agileId: z.string().describe("Agile board ID"),
-      sprintId: z.string().describe("Sprint ID"),
+      agileId: z.string().min(1).describe("Agile board ID"),
+      sprintId: z.string().min(1).describe("Sprint ID"),
       fields: z.string().optional().describe("Custom field projection"),
-      limit: z.number().int().min(1).max(100).default(42),
+      limit: z.number().int().min(1).max(100).default(PAGE_SIZE),
       skip: z.number().int().min(0).default(0),
     },
     annotations: READ_ONLY,
   }, async ({ agileId, sprintId, fields, limit, skip }, extra) => run(() =>
-    client.get(`/agiles/${agileId}/sprints/${sprintId}/issues`, {
+    client.get(`/agiles/${enc(agileId)}/sprints/${enc(sprintId)}/issues`, {
       fields: fields ?? F.SPRINT_ISSUE,
       $top: limit,
       $skip: skip,

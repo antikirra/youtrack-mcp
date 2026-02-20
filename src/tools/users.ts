@@ -1,8 +1,8 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { YouTrackClient, TTL_SESSION, TTL_HOUR } from "../client.js";
+import { PAGE_SIZE, REFERENCE_PAGE_SIZE, TTL_HOUR, TTL_SESSION, type YouTrackClient } from "../client.js";
 import * as F from "../fields.js";
-import { run, READ_ONLY } from "../utils.js";
+import { enc, READ_ONLY, run } from "../utils.js";
 
 export function registerUserTools(server: McpServer, client: YouTrackClient) {
 
@@ -23,7 +23,7 @@ export function registerUserTools(server: McpServer, client: YouTrackClient) {
     inputSchema: {
       query: z.string().optional().describe("Filter by name or login"),
       fields: z.string().optional().describe("Custom field projection"),
-      limit: z.number().int().min(1).max(100).default(42),
+      limit: z.number().int().min(1).max(100).default(PAGE_SIZE),
       skip: z.number().int().min(0).default(0),
     },
     annotations: READ_ONLY,
@@ -41,12 +41,12 @@ export function registerUserTools(server: McpServer, client: YouTrackClient) {
     title: "Get User",
     description: "Get a specific YouTrack user by database ID or login.",
     inputSchema: {
-      userId: z.string().describe("User database ID or login"),
+      userId: z.string().min(1).describe("User database ID or login"),
       fields: z.string().optional().describe("Custom field projection"),
     },
     annotations: READ_ONLY,
   }, async ({ userId, fields }, extra) => run(() =>
-    client.get(`/users/${userId}`, { fields: fields ?? F.USER }, undefined, extra.signal)
+    client.get(`/users/${enc(userId)}`, { fields: fields ?? F.USER }, undefined, extra.signal)
   ));
 
   server.registerTool("get_saved_queries", {
@@ -56,7 +56,7 @@ export function registerUserTools(server: McpServer, client: YouTrackClient) {
       "Use the query field value directly with search_issues.",
     inputSchema: {
       fields: z.string().optional().describe("Custom field projection"),
-      limit: z.number().int().min(1).max(100).default(42),
+      limit: z.number().int().min(1).max(100).default(PAGE_SIZE),
       skip: z.number().int().min(0).default(0),
     },
     annotations: READ_ONLY,
@@ -73,7 +73,9 @@ export function registerUserTools(server: McpServer, client: YouTrackClient) {
     description: "List all tags available in YouTrack. Cached for 1 hour.",
     inputSchema: {
       fields: z.string().optional().describe("Custom field projection"),
-      limit: z.number().int().min(1).max(100).default(42),
+      limit: z.number().int().min(1).max(REFERENCE_PAGE_SIZE).default(REFERENCE_PAGE_SIZE).describe(
+        "Max results. Defaults to 200 — reference data is pre-cached at startup."
+      ),
       skip: z.number().int().min(0).default(0),
     },
     annotations: READ_ONLY,

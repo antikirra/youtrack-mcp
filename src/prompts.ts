@@ -1,7 +1,8 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { completable } from "@modelcontextprotocol/sdk/server/completable.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { YouTrackClient, TTL_5MIN } from "./client.js";
+import { REFERENCE_PAGE_SIZE, TTL_5MIN, type YouTrackClient } from "./client.js";
+import { issueIdCompleter } from "./completions.js";
 
 /**
  * MCP Prompts are reusable workflow templates.
@@ -15,26 +16,6 @@ import { YouTrackClient, TTL_5MIN } from "./client.js";
  */
 
 // ─── Completion helpers ────────────────────────────────────────────────────
-
-/**
- * Completes YouTrack issue IDs by performing a live search.
- * The value parameter is treated as a YouTrack query prefix.
- * Returns up to 10 matching idReadable values.
- */
-function issueIdCompleter(client: YouTrackClient) {
-  return async (value: string): Promise<string[]> => {
-    if (!value) return [];
-    try {
-      const issues = await client.get<Array<{ idReadable: string }>>(
-        "/issues",
-        { fields: "idReadable", query: value, $top: 10 },
-      );
-      return issues.map(i => i.idReadable).filter(Boolean);
-    } catch {
-      return [];
-    }
-  };
-}
 
 /**
  * Completes Agile board IDs from a live board list.
@@ -67,7 +48,7 @@ function queryCompleter(client: YouTrackClient) {
     try {
       const projects = await client.get<Array<{ shortName: string }>>(
         "/admin/projects",
-        { fields: "shortName", $top: 200 },
+        { fields: "shortName", $top: REFERENCE_PAGE_SIZE },
         TTL_5MIN,
       );
       const lower = value.toLowerCase();

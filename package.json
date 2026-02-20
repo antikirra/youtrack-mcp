@@ -2,17 +2,30 @@
   "name": "@antikirra/youtrack-mcp",
   "version": "1.0.0",
   "description": "MCP server for JetBrains YouTrack (read-only)",
-  "keywords": ["mcp", "youtrack", "jetbrains"],
+  "keywords": [
+    "mcp",
+    "youtrack",
+    "jetbrains"
+  ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/antikirra/youtrack-mcp.git"
+  },
+  "homepage": "https://github.com/antikirra/youtrack-mcp",
   "type": "module",
   "bin": {
     "youtrack-mcp": "./dist/index.js"
   },
   "main": "./dist/index.js",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "lint": "biome check src/",
     "prepare": "npm run build"
   },
   "dependencies": {
@@ -20,9 +33,12 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.3",
     "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^4.0.18",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
   },
   "engines": {
     "node": ">=18"

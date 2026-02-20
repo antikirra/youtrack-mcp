@@ -58,11 +58,19 @@ export const ATTACHMENT =
   "id,name,extension,created,updated,size,mimeType,url,thumbnailURL," +
   "author(id,login,fullName),draft,removed,comment(id)";
 
-// Attachment with inline base64 content — used by get_issue_images
+// Image attachment projections — used by get_issue_images in two modes
+// Thumbnail mode: fetch thumbnailURL/url via HTTP; only need comment.id for source attribution
+export const IMAGE_ATTACHMENT_THUMB =
+  "id,name,mimeType,size,url,thumbnailURL,removed,comment(id)";
+// Full-resolution mode: base64Content from API; need comment author + date for attribution
 // base64Content format: "data:[mimeType];base64,[data]"
-// NOTE: Only request for image mimeTypes; may be large for high-resolution screenshots
-export const ATTACHMENT_WITH_CONTENT =
-  "id,name,mimeType,size,thumbnailURL,base64Content,removed,comment(id,author(id,login,fullName),created)";
+export const IMAGE_ATTACHMENT_FULL =
+  "id,name,mimeType,size,base64Content,removed,comment(id,author(login,fullName),created)";
+// Comment projections for image extraction — thumbnail mode only needs attachment metadata
+export const IMAGE_COMMENT_THUMB =
+  "id,author(login,fullName),created,attachments(id,name,mimeType,size,url,thumbnailURL,removed)";
+export const IMAGE_COMMENT_FULL =
+  "id,author(login,fullName),created,attachments(id,name,mimeType,size,base64Content,removed)";
 
 // ─── Issue links ───────────────────────────────────────────────────────────
 export const LINK =

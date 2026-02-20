@@ -46,17 +46,22 @@ export class YouTrackError extends Error {
   /** Number of automatic retries already performed before this error was thrown. */
   readonly retryCount: number;
 
+  /** Retry-After delay in ms, parsed from the response header on 429 responses. */
+  readonly retryAfterMs: number | undefined;
+
   constructor(
     message: string,
     statusCode: number | undefined,
     isTransient: boolean,
     retryCount = 0,
+    retryAfterMs?: number,
   ) {
     super(message);
     this.name = "YouTrackError";
     this.statusCode = statusCode;
     this.isTransient = isTransient;
     this.retryCount = retryCount;
+    this.retryAfterMs = retryAfterMs;
   }
 
   /** Actionable guidance derived from the HTTP status. */
@@ -87,4 +92,24 @@ export class YouTrackError extends Error {
 /** Returns true if the HTTP status code represents a transient, retryable condition. */
 export function isTransientStatus(status: number): boolean {
   return TRANSIENT_STATUSES.has(status);
+}
+
+/**
+ * Parses the Retry-After header value into milliseconds.
+ * Supports both delay-seconds (e.g. "120") and HTTP-date formats.
+ * Returns undefined if the header is absent or unparseable.
+ */
+export function parseRetryAfter(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.ceil(seconds * 1000);
+  }
+  // Try HTTP-date format
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) {
+    const delay = date - Date.now();
+    return delay > 0 ? delay : 0;
+  }
+  return undefined;
 }

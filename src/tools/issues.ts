@@ -1,8 +1,8 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { YouTrackClient, TTL_HOUR } from "../client.js";
+import { PAGE_SIZE, TTL_HOUR, type YouTrackClient } from "../client.js";
 import * as F from "../fields.js";
-import { run, READ_ONLY } from "../utils.js";
+import { enc, READ_ONLY, run } from "../utils.js";
 
 const ACTIVITY_CATEGORIES =
   "CommentsCategory, AttachmentsCategory, IssueCreatedCategory, IssueResolvedCategory, " +
@@ -23,7 +23,7 @@ export function registerIssueTools(server: McpServer, client: YouTrackClient) {
       ),
       fields: z.string().optional().describe("Custom field projection (overrides default)"),
       limit: z.number().int().min(1).max(100).default(25).describe(
-        "Max results (server caps at ~42)"
+        "Max results to return"
       ),
       skip: z.number().int().min(0).default(0).describe("Offset for pagination"),
     },
@@ -42,26 +42,26 @@ export function registerIssueTools(server: McpServer, client: YouTrackClient) {
     title: "Get Issue",
     description: "Get full details of a YouTrack issue by ID.",
     inputSchema: {
-      issueId: z.string().describe("Issue ID, e.g. FOO-123"),
+      issueId: z.string().min(1).describe("Issue ID, e.g. FOO-123"),
       fields: z.string().optional().describe("Custom field projection"),
     },
     annotations: READ_ONLY,
   }, async ({ issueId, fields }, extra) => run(() =>
-    client.get(`/issues/${issueId}`, { fields: fields ?? F.ISSUE_DETAIL }, undefined, extra.signal)
+    client.get(`/issues/${enc(issueId)}`, { fields: fields ?? F.ISSUE_DETAIL }, undefined, extra.signal)
   ));
 
   server.registerTool("get_issue_comments", {
     title: "Get Issue Comments",
-    description: "Get comments for a YouTrack issue, newest first by default.",
+    description: "Get comments for a YouTrack issue, oldest first by default.",
     inputSchema: {
-      issueId: z.string().describe("Issue ID, e.g. FOO-123"),
+      issueId: z.string().min(1).describe("Issue ID, e.g. FOO-123"),
       fields: z.string().optional().describe("Custom field projection"),
-      limit: z.number().int().min(1).max(100).default(42),
+      limit: z.number().int().min(1).max(100).default(PAGE_SIZE),
       skip: z.number().int().min(0).default(0),
     },
     annotations: READ_ONLY,
   }, async ({ issueId, fields, limit, skip }, extra) => run(() =>
-    client.get(`/issues/${issueId}/comments`, {
+    client.get(`/issues/${enc(issueId)}/comments`, {
       fields: fields ?? F.COMMENT,
       $top: limit,
       $skip: skip,
@@ -74,12 +74,12 @@ export function registerIssueTools(server: McpServer, client: YouTrackClient) {
       "Get links to related issues (duplicates, depends on, relates to, etc.). " +
       "Use get_issue_link_types to see all available link type names.",
     inputSchema: {
-      issueId: z.string().describe("Issue ID, e.g. FOO-123"),
+      issueId: z.string().min(1).describe("Issue ID, e.g. FOO-123"),
       fields: z.string().optional().describe("Custom field projection"),
     },
     annotations: READ_ONLY,
   }, async ({ issueId, fields }, extra) => run(() =>
-    client.get(`/issues/${issueId}/links`, { fields: fields ?? F.LINK }, undefined, extra.signal)
+    client.get(`/issues/${enc(issueId)}/links`, { fields: fields ?? F.LINK }, undefined, extra.signal)
   ));
 
   server.registerTool("get_issue_activities", {
@@ -88,7 +88,7 @@ export function registerIssueTools(server: McpServer, client: YouTrackClient) {
       "Get the change history of a YouTrack issue. " +
       "Filter by categories to reduce noise, e.g. only state/field changes.",
     inputSchema: {
-      issueId: z.string().describe("Issue ID, e.g. FOO-123"),
+      issueId: z.string().min(1).describe("Issue ID, e.g. FOO-123"),
       categories: z.string().optional().describe(
         `Comma-separated categories. Available: ${ACTIVITY_CATEGORIES}`
       ),
@@ -101,7 +101,7 @@ export function registerIssueTools(server: McpServer, client: YouTrackClient) {
         "true = newest-to-oldest, false = oldest-to-newest"
       ),
       fields: z.string().optional().describe("Custom field projection"),
-      limit: z.number().int().min(1).max(100).default(42),
+      limit: z.number().int().min(1).max(100).default(PAGE_SIZE),
       skip: z.number().int().min(0).default(0),
     },
     annotations: READ_ONLY,
@@ -119,7 +119,7 @@ export function registerIssueTools(server: McpServer, client: YouTrackClient) {
       if (end !== undefined) params.end = end;
       // /activities supports $top/$skip offset pagination
       // /activitiesPage uses cursor-based pagination — incompatible with skip
-      return client.get(`/issues/${issueId}/activities`, params, undefined, extra.signal);
+      return client.get(`/issues/${enc(issueId)}/activities`, params, undefined, extra.signal);
     })
   );
 
@@ -127,14 +127,14 @@ export function registerIssueTools(server: McpServer, client: YouTrackClient) {
     title: "Get Issue Attachments",
     description: "List files attached to a YouTrack issue.",
     inputSchema: {
-      issueId: z.string().describe("Issue ID, e.g. FOO-123"),
+      issueId: z.string().min(1).describe("Issue ID, e.g. FOO-123"),
       fields: z.string().optional().describe("Custom field projection"),
-      limit: z.number().int().min(1).max(100).default(42),
+      limit: z.number().int().min(1).max(100).default(PAGE_SIZE),
       skip: z.number().int().min(0).default(0),
     },
     annotations: READ_ONLY,
   }, async ({ issueId, fields, limit, skip }, extra) => run(() =>
-    client.get(`/issues/${issueId}/attachments`, {
+    client.get(`/issues/${enc(issueId)}/attachments`, {
       fields: fields ?? F.ATTACHMENT,
       $top: limit,
       $skip: skip,
@@ -145,12 +145,12 @@ export function registerIssueTools(server: McpServer, client: YouTrackClient) {
     title: "Get Issue Tags",
     description: "Get tags applied to a YouTrack issue.",
     inputSchema: {
-      issueId: z.string().describe("Issue ID, e.g. FOO-123"),
+      issueId: z.string().min(1).describe("Issue ID, e.g. FOO-123"),
     },
     annotations: READ_ONLY,
   }, async ({ issueId }, extra) => run(() =>
-    client.get(`/issues/${issueId}/tags`, {
-      fields: "id,name,color(id,background,foreground)",
+    client.get(`/issues/${enc(issueId)}/tags`, {
+      fields: F.TAG,
     }, undefined, extra.signal)
   ));
 
@@ -158,14 +158,14 @@ export function registerIssueTools(server: McpServer, client: YouTrackClient) {
     title: "Get Work Items",
     description: "Get time tracking work items (logged hours) for a YouTrack issue.",
     inputSchema: {
-      issueId: z.string().describe("Issue ID, e.g. FOO-123"),
+      issueId: z.string().min(1).describe("Issue ID, e.g. FOO-123"),
       fields: z.string().optional().describe("Custom field projection"),
-      limit: z.number().int().min(1).max(100).default(42),
+      limit: z.number().int().min(1).max(100).default(PAGE_SIZE),
       skip: z.number().int().min(0).default(0),
     },
     annotations: READ_ONLY,
   }, async ({ issueId, fields, limit, skip }, extra) => run(() =>
-    client.get(`/issues/${issueId}/timeTracking/workItems`, {
+    client.get(`/issues/${enc(issueId)}/timeTracking/workItems`, {
       fields: fields ?? F.WORK_ITEM,
       $top: limit,
       $skip: skip,

@@ -1,8 +1,9 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { YouTrackClient } from "../client.js";
-import { fail } from "../utils.js";
+import { z } from "zod";
+import { REFERENCE_PAGE_SIZE, type YouTrackClient } from "../client.js";
+import * as F from "../fields.js";
+import { enc, fail, READ_ONLY } from "../utils.js";
 
 /**
  * Image extraction tool.
@@ -61,7 +62,7 @@ function parseDataUri(dataUri: string): { mimeType: string; data: string } | nul
 }
 
 function formatSize(bytes?: number): string {
-  if (!bytes) return "unknown size";
+  if (bytes == null) return "unknown size";
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
@@ -94,7 +95,7 @@ export function registerImageTools(server: McpServer, client: YouTrackClient) {
       "Each image is preceded by a text block describing its filename, size, and source " +
       "(which comment it came from or if it's a direct attachment).",
     inputSchema: {
-      issueId: z.string().describe("Issue ID, e.g. FOO-123"),
+      issueId: z.string().min(1).describe("Issue ID, e.g. FOO-123"),
       useThumbnails: z.boolean().default(true).describe(
         "true = smaller thumbnails (overview); false = full-resolution base64Content (for reading text)"
       ),
@@ -105,12 +106,7 @@ export function registerImageTools(server: McpServer, client: YouTrackClient) {
         "Maximum number of images to return"
       ),
     },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
+    annotations: READ_ONLY,
   }, async ({ issueId, useThumbnails, includeCommentImages, limit }, extra) => {
     // Progress token: if provided by the client, send per-image download notifications.
     // This lets the orchestrator show a live progress indicator for long image fetches.
@@ -124,80 +120,44 @@ export function registerImageTools(server: McpServer, client: YouTrackClient) {
       : undefined;
 
     try {
-      const allAttachments: RawAttachment[] = [];
+      const issueAttachments = await client.get<RawAttachment[]>(
+        `/issues/${enc(issueId)}/attachments`,
+        {
+          fields: useThumbnails ? F.IMAGE_ATTACHMENT_THUMB : F.IMAGE_ATTACHMENT_FULL,
+          $top: limit * 3,
+        },
+        undefined,
+        extra.signal,
+      );
+      // When includeCommentImages is on, comment attachments will be collected
+      // from the /comments endpoint below (with richer attribution context).
+      // Exclude them here to avoid duplicates — /attachments returns ALL attachments
+      // including comment-attached ones (identifiable by non-null `comment` field).
+      const allAttachments: RawAttachment[] = includeCommentImages
+        ? issueAttachments.filter(a => !a.removed && !a.comment)
+        : issueAttachments.filter(a => !a.removed);
 
-      if (useThumbnails) {
-        // ── Thumbnail mode: fetch metadata, then download thumbnailURL via HTTP ──
-        const issueAttachments = await client.get<RawAttachment[]>(
-          `/issues/${issueId}/attachments`,
-          { fields: "id,name,mimeType,size,url,thumbnailURL,removed,comment(id)" },
-          undefined,
-          extra.signal,
-        );
-        allAttachments.push(...issueAttachments.filter(a => !a.removed));
-
-        if (includeCommentImages) {
-          const comments = await client.get<RawComment[]>(
-            `/issues/${issueId}/comments`,
-            {
-              fields: "id,author(login,fullName),created," +
-                "attachments(id,name,mimeType,size,url,thumbnailURL,removed)",
-              $top: 200,
-            },
-            undefined,
-            extra.signal,
-          );
-          for (const comment of comments) {
-            for (const att of comment.attachments ?? []) {
-              if (!att.removed) {
-                allAttachments.push({
-                  ...att,
-                  comment: {
-                    id: comment.id,
-                    author: comment.author,
-                    created: comment.created,
-                  },
-                });
-              }
-            }
-          }
-        }
-      } else {
-        // ── Full-resolution mode: request base64Content directly from API ────────
-        const issueAttachments = await client.get<RawAttachment[]>(
-          `/issues/${issueId}/attachments`,
+      if (includeCommentImages) {
+        const comments = await client.get<RawComment[]>(
+          `/issues/${enc(issueId)}/comments`,
           {
-            fields: "id,name,mimeType,size,base64Content,removed," +
-              "comment(id,author(login,fullName),created)",
+            fields: useThumbnails ? F.IMAGE_COMMENT_THUMB : F.IMAGE_COMMENT_FULL,
+            $top: REFERENCE_PAGE_SIZE,
           },
           undefined,
           extra.signal,
         );
-        allAttachments.push(...issueAttachments.filter(a => !a.removed));
-
-        if (includeCommentImages) {
-          const comments = await client.get<RawComment[]>(
-            `/issues/${issueId}/comments`,
-            {
-              fields: "id,author(login,fullName),created," +
-                "attachments(id,name,mimeType,size,base64Content,removed)",
-              $top: 200,
-            },
-            undefined,
-            extra.signal,
-          );
-          for (const comment of comments) {
-            for (const att of comment.attachments ?? []) {
-              if (!att.removed) {
-                allAttachments.push({
-                  ...att,
-                  comment: {
-                    id: comment.id,
-                    author: comment.author,
-                    created: comment.created,
-                  },
-                });
-              }
+        for (const comment of comments) {
+          for (const att of comment.attachments ?? []) {
+            if (!att.removed) {
+              allAttachments.push({
+                ...att,
+                comment: {
+                  id: comment.id,
+                  author: comment.author,
+                  created: comment.created,
+                },
+              });
             }
           }
         }

@@ -1,4 +1,4 @@
-import { YouTrackError, isTransientStatus } from "./errors.js";
+import { isTransientStatus, parseRetryAfter, YouTrackError } from "./errors.js";
 
 export interface YouTrackConfig {
   baseUrl: string;
@@ -24,9 +24,8 @@ function sleep(ms: number): Promise<void> {
  */
 function withTimeout(timeoutMs: number, signal?: AbortSignal): AbortSignal {
   if (!signal) return AbortSignal.timeout(timeoutMs);
-  const any = (AbortSignal as { any?: (signals: AbortSignal[]) => AbortSignal }).any;
-  if (typeof any === "function") {
-    return any([signal, AbortSignal.timeout(timeoutMs)]);
+  if (typeof AbortSignal.any === "function") {
+    return AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
   }
   // Node.js 18 fallback
   return AbortSignal.timeout(timeoutMs);
@@ -34,21 +33,36 @@ function withTimeout(timeoutMs: number, signal?: AbortSignal): AbortSignal {
 
 // ─── TTL cache ─────────────────────────────────────────────────────────────
 
+/** Sentinel value distinguishing a cached `undefined`/`null` from a cache miss. */
+const MISS = Symbol("cache-miss");
+
+const MAX_CACHE_ENTRIES = 1000;
+
 class TTLCache {
   private readonly store = new Map<string, { value: unknown; exp: number }>();
 
-  get<T>(key: string): T | undefined {
+  get<T>(key: string): T | typeof MISS {
     const entry = this.store.get(key);
-    if (!entry) return undefined;
+    if (!entry) return MISS;
     if (Date.now() > entry.exp) {
       this.store.delete(key);
-      return undefined;
+      return MISS;
     }
+    // Move to end so recently-accessed entries survive eviction
+    this.store.delete(key);
+    this.store.set(key, entry);
     return entry.value as T;
   }
 
   set(key: string, value: unknown, ttlMs: number): void {
+    // Delete first so re-insertion moves to the end (Map preserves insertion order)
+    this.store.delete(key);
     this.store.set(key, { value, exp: Date.now() + ttlMs });
+    // Evict oldest entries when cache exceeds size limit
+    if (this.store.size > MAX_CACHE_ENTRIES) {
+      const first = this.store.keys().next().value;
+      if (first !== undefined) this.store.delete(first);
+    }
   }
 }
 
@@ -89,7 +103,7 @@ export class YouTrackClient {
 
   constructor(config: YouTrackConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
-    this.apiBase = this.baseUrl + "/api";
+    this.apiBase = `${this.baseUrl}/api`;
     this.authHeader = `Bearer ${config.token}`;
   }
 
@@ -99,8 +113,6 @@ export class YouTrackClient {
    * @param path    API path, e.g. `/issues/FOO-1`
    * @param params  Query parameters (fields, $top, $skip, etc.)
    * @param ttlMs   Optional TTL for in-memory cache. Omit to skip caching.
-   */
-  /**
    * @param signal  Optional AbortSignal from RequestHandlerExtra. When provided,
    *                the HTTP request is cancelled if the MCP client abandons the call.
    *                Uses AbortSignal.any() on Node.js 20+; falls back to timeout-only
@@ -112,7 +124,7 @@ export class YouTrackClient {
     const cacheKey = ttlMs !== undefined ? urlStr : null;
     if (cacheKey) {
       const cached = this.cache.get<T>(cacheKey);
-      if (cached !== undefined) return cached;
+      if (cached !== MISS) return cached;
     }
 
     const data = await this.fetchWithRetry<T>(() => this.fetchJson<T>(urlStr, signal), signal);
@@ -155,7 +167,7 @@ export class YouTrackClient {
   async getBytes(url: string, signal?: AbortSignal): Promise<{ data: string; mimeType: string }> {
     const absoluteUrl = /^https?:\/\//i.test(url)
       ? url
-      : `${this.baseUrl}${url.startsWith("/") ? url : "/" + url}`;
+      : `${this.baseUrl}${url.startsWith("/") ? url : `/${url}`}`;
 
     return this.fetchWithRetry(async () => {
       let response: Response;
@@ -188,6 +200,8 @@ export class YouTrackClient {
           `Attachment download failed: ${absoluteUrl}`,
           response.status,
           isTransientStatus(response.status),
+          0,
+          parseRetryAfter(response.headers.get("retry-after")),
         );
       }
 
@@ -226,7 +240,12 @@ export class YouTrackClient {
 
         // Don't retry if the client has cancelled
         if (transient && hasRetries && !signal?.aborted) {
-          await sleep(RETRY_DELAYS_MS[attempt]);
+          // Prefer Retry-After header delay (capped at 30s), fall back to fixed schedule
+          const retryAfter = err instanceof YouTrackError ? err.retryAfterMs : undefined;
+          const delay = retryAfter !== undefined
+            ? Math.min(retryAfter, 30_000)
+            : RETRY_DELAYS_MS[attempt];
+          await sleep(delay);
           continue;
         }
 
@@ -234,7 +253,7 @@ export class YouTrackClient {
         this.recordFailure(err);
 
         if (err instanceof YouTrackError && attempt > 0) {
-          throw new YouTrackError(err.message, err.statusCode, err.isTransient, attempt);
+          throw new YouTrackError(err.message, err.statusCode, err.isTransient, attempt, err.retryAfterMs);
         }
         throw err;
       }
@@ -291,7 +310,13 @@ export class YouTrackClient {
 
     if (!response.ok) {
       const detail = await parseErrorBody(response);
-      throw new YouTrackError(detail, response.status, isTransientStatus(response.status));
+      throw new YouTrackError(
+        detail,
+        response.status,
+        isTransientStatus(response.status),
+        0,
+        parseRetryAfter(response.headers.get("retry-after")),
+      );
     }
 
     return response.json() as Promise<T>;
@@ -310,6 +335,14 @@ async function parseErrorBody(response: Response): Promise<string> {
     return response.statusText;
   }
 }
+
+// ─── Page sizes ─────────────────────────────────────────────────────────────
+
+/** Default page size for regular paginated lists (comments, activities, etc.). */
+export const PAGE_SIZE = 42;
+
+/** Page size for reference data that is pre-cached at startup (projects, tags, etc.). */
+export const REFERENCE_PAGE_SIZE = 200;
 
 // ─── Cache TTLs ────────────────────────────────────────────────────────────
 

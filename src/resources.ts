@@ -1,7 +1,9 @@
-import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Variables } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
-import { YouTrackClient, TTL_5MIN, TTL_HOUR, TTL_SESSION } from "./client.js";
+import { REFERENCE_PAGE_SIZE, TTL_5MIN, TTL_HOUR, TTL_SESSION, type YouTrackClient } from "./client.js";
+import { issueIdCompleter } from "./completions.js";
 import * as F from "./fields.js";
+import { enc } from "./utils.js";
 
 /**
  * MCP Resources expose YouTrack reference data as URI-addressable documents.
@@ -28,7 +30,7 @@ export function registerResources(server: McpServer, client: YouTrackClient) {
     async (uri: URL, extra) => {
       const projects = await client.get(
         "/admin/projects",
-        { fields: F.PROJECT_DETAIL, $top: 200 },
+        { fields: F.PROJECT_DETAIL, $top: REFERENCE_PAGE_SIZE },
         TTL_5MIN,
         extra.signal,
       );
@@ -85,18 +87,7 @@ export function registerResources(server: McpServer, client: YouTrackClient) {
     new ResourceTemplate("youtrack://issues/{issueId}", {
       list: undefined,
       complete: {
-        issueId: async (value) => {
-          if (!value) return [];
-          try {
-            const issues = await client.get<Array<{ idReadable: string }>>(
-              "/issues",
-              { fields: "idReadable", query: value, $top: 10 },
-            );
-            return issues.map(i => i.idReadable).filter(Boolean);
-          } catch {
-            return [];
-          }
-        },
+        issueId: issueIdCompleter(client),
       },
     }),
     {
@@ -105,9 +96,9 @@ export function registerResources(server: McpServer, client: YouTrackClient) {
       mimeType: "application/json",
     },
     async (uri: URL, variables: Variables, extra) => {
-      const issueId = variables["issueId"] as string;
+      const issueId = variables.issueId as string;
       const issue = await client.get(
-        `/issues/${issueId}`,
+        `/issues/${enc(issueId)}`,
         { fields: F.ISSUE_DETAIL },
         undefined,
         extra.signal,

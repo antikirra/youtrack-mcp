@@ -1,8 +1,8 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { YouTrackClient, TTL_HOUR, TTL_5MIN } from "../client.js";
+import { REFERENCE_PAGE_SIZE, TTL_5MIN, TTL_HOUR, type YouTrackClient } from "../client.js";
 import * as F from "../fields.js";
-import { run, READ_ONLY } from "../utils.js";
+import { enc, READ_ONLY, run } from "../utils.js";
 
 /**
  * Proactive exploration tools.
@@ -39,17 +39,17 @@ export function registerInspectTools(server: McpServer, client: YouTrackClient) 
       "Assignee: me, Type: Bug). " +
       "Results cached for 5 minutes.",
     inputSchema: {
-      projectId: z.string().describe("Project database ID or shortName (e.g. FOO)"),
+      projectId: z.string().min(1).describe("Project database ID or shortName (e.g. FOO)"),
     },
     annotations: READ_ONLY,
   }, async ({ projectId }, extra) => run(async () => {
     const [project, customFields] = await Promise.all([
-      client.get<unknown>(`/admin/projects/${projectId}`, {
+      client.get<unknown>(`/admin/projects/${enc(projectId)}`, {
         fields: F.PROJECT_DETAIL,
       }, TTL_5MIN, extra.signal),
-      client.get<unknown[]>(`/admin/projects/${projectId}/customFields`, {
+      client.get<unknown[]>(`/admin/projects/${enc(projectId)}/customFields`, {
         fields: F.PROJECT_SCHEMA_FIELD,
-        $top: 200,
+        $top: REFERENCE_PAGE_SIZE,
       }, TTL_5MIN, extra.signal),
     ]);
     return {
@@ -82,11 +82,11 @@ export function registerInspectTools(server: McpServer, client: YouTrackClient) 
       "color coding, and sprint sync settings. " +
       "Essential before sprint analysis or when interpreting board column semantics.",
     inputSchema: {
-      agileId: z.string().describe("Agile board ID"),
+      agileId: z.string().min(1).describe("Agile board ID"),
     },
     annotations: READ_ONLY,
   }, async ({ agileId }, extra) => run(() =>
-    client.get(`/agiles/${agileId}`, { fields: F.BOARD_STRUCTURE }, undefined, extra.signal)
+    client.get(`/agiles/${enc(agileId)}`, { fields: F.BOARD_STRUCTURE }, undefined, extra.signal)
   ));
 
   // ── get_global_custom_fields ─────────────────────────────────────────────
@@ -101,7 +101,9 @@ export function registerInspectTools(server: McpServer, client: YouTrackClient) 
       "Cached for 1 hour.",
     inputSchema: {
       fields: z.string().optional().describe("Custom field projection"),
-      limit: z.number().int().min(1).max(200).default(100),
+      limit: z.number().int().min(1).max(REFERENCE_PAGE_SIZE).default(REFERENCE_PAGE_SIZE).describe(
+        "Max results. Defaults to 200 — reference data is pre-cached at startup."
+      ),
       skip: z.number().int().min(0).default(0),
     },
     annotations: READ_ONLY,
@@ -128,14 +130,14 @@ export function registerInspectTools(server: McpServer, client: YouTrackClient) 
       bundleType: z.enum(BUNDLE_TYPES).describe(
         "Bundle type: enum | state | version | ownedField | build"
       ),
-      bundleId: z.string().describe(
+      bundleId: z.string().min(1).describe(
         "Bundle ID — obtain from inspect_project_schema: field.bundle.id"
       ),
       includeArchived: z.boolean().default(false).describe(
         "Include archived values (appear in historical issues but no longer selectable)"
       ),
       fields: z.string().optional().describe("Custom field projection"),
-      limit: z.number().int().min(1).max(500).default(200),
+      limit: z.number().int().min(1).max(500).default(REFERENCE_PAGE_SIZE),
       skip: z.number().int().min(0).default(0),
     },
     annotations: READ_ONLY,
@@ -150,7 +152,7 @@ export function registerInspectTools(server: McpServer, client: YouTrackClient) 
       if (includeArchived) params.includeArchived = true;
 
       const values = await client.get(
-        `/admin/customFieldSettings/bundles/${bundleType as BundleType}/${bundleId}/values`,
+        `/admin/customFieldSettings/bundles/${enc(bundleType as BundleType)}/${enc(bundleId)}/values`,
         params,
         TTL_HOUR,
         extra.signal,

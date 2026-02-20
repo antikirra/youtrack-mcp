@@ -1,21 +1,25 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createClient } from "./client.js";
+import { createClient, type YouTrackClient } from "./client.js";
+import { registerPrompts } from "./prompts.js";
+import { registerResources } from "./resources.js";
+import { registerAgileTools } from "./tools/agile.js";
+import { registerImageTools } from "./tools/images.js";
+import { registerInspectTools } from "./tools/inspect.js";
 import { registerIssueTools } from "./tools/issues.js";
 import { registerProjectTools } from "./tools/projects.js";
 import { registerReportTools } from "./tools/reports.js";
-import { registerAgileTools } from "./tools/agile.js";
 import { registerUserTools } from "./tools/users.js";
-import { registerInspectTools } from "./tools/inspect.js";
-import { registerImageTools } from "./tools/images.js";
-import { registerResources } from "./resources.js";
-import { registerPrompts } from "./prompts.js";
 import { scheduleWarmup } from "./warmup.js";
+
+const require = createRequire(import.meta.url);
+const { version } = require("../package.json") as { version: string };
 
 // ─── Configuration ─────────────────────────────────────────────────────────
 
-let client;
+let client: YouTrackClient;
 try {
   client = createClient();
 } catch (err) {
@@ -26,7 +30,7 @@ try {
 // ─── Server ────────────────────────────────────────────────────────────────
 
 const server = new McpServer(
-  { name: "youtrack-mcp", version: "1.0.0" },
+  { name: "youtrack-mcp", version },
   {
     capabilities: {
       tools: {},
@@ -82,7 +86,7 @@ try {
   await server.connect(transport);
   await server.sendLoggingMessage({
     level: "info",
-    data: `youtrack-mcp v1.0.0 started — ${process.env.YOUTRACK_BASE_URL}`,
+    data: `youtrack-mcp v${version} started — ${process.env.YOUTRACK_BASE_URL}`,
   });
 } catch (err) {
   process.stderr.write(`[youtrack-mcp] Failed to start: ${(err as Error).message}\n`);
