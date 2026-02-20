@@ -16,6 +16,19 @@ export function ok(data: unknown): CallToolResult {
 }
 
 /**
+ * Formats any caught value into a single-line error string.
+ *
+ * YouTrackErrors include the structured hint; plain Errors use message;
+ * anything else is stringified. Used both in tool error results and in
+ * batch operations where individual failures are collected, not thrown.
+ */
+export function formatError(e: unknown): string {
+  return e instanceof YouTrackError
+    ? e.toToolText()
+    : e instanceof Error ? e.message : String(e);
+}
+
+/**
  * Tool error result — sets isError so the MCP client signals failure.
  *
  * YouTrackErrors are rendered with their structured hint so the LLM receives
@@ -23,10 +36,7 @@ export function ok(data: unknown): CallToolResult {
  * Format: [YouTrack <status>] <detail> — <hint> (retried N×)
  */
 export function fail(e: unknown): CallToolResult {
-  const text = e instanceof YouTrackError
-    ? e.toToolText()
-    : e instanceof Error ? e.message : String(e);
-  return { content: [{ type: "text", text }], isError: true };
+  return { content: [{ type: "text", text: formatError(e) }], isError: true };
 }
 
 /**

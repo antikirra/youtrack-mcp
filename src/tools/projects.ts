@@ -60,4 +60,5 @@ export function registerProjectTools(server: McpServer, client: YouTrackClient) 
       $skip: skip,
     }, TTL_5MIN, extra.signal)
   ));
+
 }

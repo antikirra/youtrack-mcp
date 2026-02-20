@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { PAGE_SIZE, TTL_HOUR, type YouTrackClient } from "../client.js";
 import * as F from "../fields.js";
-import { enc, READ_ONLY, run } from "../utils.js";
+import { enc, formatError, READ_ONLY, run } from "../utils.js";
 
 const ACTIVITY_CATEGORIES =
   "CommentsCategory, AttachmentsCategory, IssueCreatedCategory, IssueResolvedCategory, " +
@@ -184,4 +184,101 @@ export function registerIssueTools(server: McpServer, client: YouTrackClient) {
   }, async ({ fields }, extra) => run(() =>
     client.get("/issueLinkTypes", { fields: fields ?? F.LINK_TYPE }, TTL_HOUR, extra.signal)
   ));
+
+  server.registerTool("batch_get_issues", {
+    title: "Batch Get Issues",
+    description:
+      "Get full details for multiple YouTrack issues in parallel. " +
+      "Returns an array where each entry contains either the issue data or an error message. " +
+      "Partial failures are isolated — a single missing issue does not abort the batch. " +
+      "Use this when you have multiple issue IDs from a search result and need details for all of them.",
+    inputSchema: {
+      issueIds: z.array(z.string().min(1)).min(1).max(25).describe(
+        "List of issue IDs, e.g. [\"FOO-1\", \"FOO-2\"]"
+      ),
+      fields: z.string().optional().describe("Custom field projection (applied to all issues)"),
+    },
+    annotations: READ_ONLY,
+  }, async ({ issueIds, fields }, extra) => run(async () => {
+    const results = await Promise.all(
+      issueIds.map(async (id) => {
+        try {
+          const issue = await client.get(`/issues/${enc(id)}`, { fields: fields ?? F.ISSUE_DETAIL }, undefined, extra.signal);
+          return { id, issue };
+        } catch (e) {
+          return { id, error: formatError(e) };
+        }
+      })
+    );
+    return results;
+  }));
+
+  server.registerTool("batch_get_comments", {
+    title: "Batch Get Comments",
+    description:
+      "Get comments for multiple YouTrack issues in parallel. " +
+      "Returns an array where each entry contains comments for one issue or an error message. " +
+      "Use this after a search when you need to read comments for several issues at once.",
+    inputSchema: {
+      issueIds: z.array(z.string().min(1)).min(1).max(10).describe(
+        "List of issue IDs, e.g. [\"FOO-1\", \"FOO-2\"]"
+      ),
+      limit: z.number().int().min(1).max(100).default(PAGE_SIZE).describe("Max comments per issue"),
+      fields: z.string().optional().describe("Custom field projection"),
+    },
+    annotations: READ_ONLY,
+  }, async ({ issueIds, limit, fields }, extra) => run(async () => {
+    const results = await Promise.all(
+      issueIds.map(async (id) => {
+        try {
+          const comments = await client.get(`/issues/${enc(id)}/comments`, {
+            fields: fields ?? F.COMMENT,
+            $top: limit,
+            $skip: 0,
+          }, undefined, extra.signal);
+          return { id, comments };
+        } catch (e) {
+          return { id, error: formatError(e) };
+        }
+      })
+    );
+    return results;
+  }));
+
+  server.registerTool("batch_get_activities", {
+    title: "Batch Get Activities",
+    description:
+      "Get change history for multiple YouTrack issues in parallel. " +
+      "Returns an array where each entry contains activities for one issue or an error message. " +
+      "Use this to compare how several issues evolved over time without sequential round-trips.",
+    inputSchema: {
+      issueIds: z.array(z.string().min(1)).min(1).max(10).describe(
+        "List of issue IDs, e.g. [\"FOO-1\", \"FOO-2\"]"
+      ),
+      categories: z.string().optional().describe(
+        `Comma-separated categories. Available: ${ACTIVITY_CATEGORIES}`
+      ),
+      limit: z.number().int().min(1).max(100).default(PAGE_SIZE).describe("Max activities per issue"),
+      fields: z.string().optional().describe("Custom field projection"),
+    },
+    annotations: READ_ONLY,
+  }, async ({ issueIds, categories, limit, fields }, extra) => run(async () => {
+    const results = await Promise.all(
+      issueIds.map(async (id) => {
+        try {
+          const params: Record<string, string | number> = {
+            fields: fields ?? F.ACTIVITY,
+            $top: limit,
+            $skip: 0,
+          };
+          if (categories) params.categories = categories;
+          const activities = await client.get(`/issues/${enc(id)}/activities`, params, undefined, extra.signal);
+          return { id, activities };
+        } catch (e) {
+          return { id, error: formatError(e) };
+        }
+      })
+    );
+    return results;
+  }));
 }

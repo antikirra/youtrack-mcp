@@ -29,6 +29,14 @@ describe("field projections", () => {
     }
   });
 
+  it("ARTICLE_LIST fields appear in ARTICLE_DETAIL", () => {
+    const listFields = extractTopLevelFields(F.ARTICLE_LIST);
+    const detailFields = extractTopLevelFields(F.ARTICLE_DETAIL);
+    for (const field of listFields) {
+      expect(detailFields).toContain(field);
+    }
+  });
+
   it("ISSUE_LIST includes customFields projection for polymorphic values", () => {
     // customFields is critical — without it, priority/state/assignee are invisible
     expect(F.ISSUE_LIST).toContain("customFields(");

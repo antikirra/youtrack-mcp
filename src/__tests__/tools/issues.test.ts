@@ -19,8 +19,8 @@ describe("issue tools", () => {
     registerIssueTools(srv.server as unknown as McpServer, cli.client);
   });
 
-  it("registers all 9 issue tools", () => {
-    expect(tools.size).toBe(9);
+  it("registers all 12 issue tools", () => {
+    expect(tools.size).toBe(12);
     expect(tools.has("search_issues")).toBe(true);
     expect(tools.has("get_issue")).toBe(true);
     expect(tools.has("get_issue_comments")).toBe(true);
@@ -30,6 +30,9 @@ describe("issue tools", () => {
     expect(tools.has("get_issue_tags")).toBe(true);
     expect(tools.has("get_work_items")).toBe(true);
     expect(tools.has("get_issue_link_types")).toBe(true);
+    expect(tools.has("batch_get_issues")).toBe(true);
+    expect(tools.has("batch_get_comments")).toBe(true);
+    expect(tools.has("batch_get_activities")).toBe(true);
   });
 
   describe("search_issues", () => {
@@ -295,6 +298,197 @@ describe("issue tools", () => {
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("Authentication failed");
+    });
+  });
+
+  describe("batch_get_issues", () => {
+    it("fetches each issue individually and returns array", async () => {
+      const handler = tools.get("batch_get_issues")!;
+      const result = await handler({ issueIds: ["FOO-1", "FOO-2"] }, extra) as { content: Array<{ text: string }> };
+      const data = parseOkResult(result) as Array<{ id: string; issue: unknown }>;
+      expect(data).toHaveLength(2);
+      expect(data[0].id).toBe("FOO-1");
+      expect(data[1].id).toBe("FOO-2");
+      expect(getSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("calls correct path with ISSUE_DETAIL fields for each id", async () => {
+      const handler = tools.get("batch_get_issues")!;
+      await handler({ issueIds: ["FOO-1"] }, extra);
+      expect(getSpy).toHaveBeenCalledWith(
+        "/issues/FOO-1",
+        { fields: F.ISSUE_DETAIL },
+        undefined,
+        extra.signal,
+      );
+    });
+
+    it("isolates failures — one error does not abort the batch", async () => {
+      const { YouTrackError } = await import("../../errors.js");
+      getSpy.mockResolvedValueOnce({ id: "1", idReadable: "FOO-1" });
+      getSpy.mockRejectedValueOnce(new YouTrackError("Not found", 404, false));
+      getSpy.mockResolvedValueOnce({ id: "3", idReadable: "FOO-3" });
+
+      const handler = tools.get("batch_get_issues")!;
+      const result = await handler({ issueIds: ["FOO-1", "FOO-2", "FOO-3"] }, extra) as { content: Array<{ text: string }> };
+      const data = parseOkResult(result) as Array<{ id: string; issue?: unknown; error?: string }>;
+
+      expect(data).toHaveLength(3);
+      expect(data[0]).toMatchObject({ id: "FOO-1", issue: { idReadable: "FOO-1" } });
+      expect(data[1]).toMatchObject({ id: "FOO-2", error: expect.stringContaining("[YouTrack 404]") });
+      expect(data[2]).toMatchObject({ id: "FOO-3", issue: { idReadable: "FOO-3" } });
+    });
+
+    it("uses custom fields when provided", async () => {
+      const handler = tools.get("batch_get_issues")!;
+      await handler({ issueIds: ["FOO-1"], fields: "id,summary" }, extra);
+      expect(getSpy).toHaveBeenCalledWith(
+        "/issues/FOO-1",
+        { fields: "id,summary" },
+        undefined,
+        extra.signal,
+      );
+    });
+
+    it("captures generic Error message in error field", async () => {
+      getSpy.mockRejectedValueOnce(new Error("Network failure"));
+
+      const handler = tools.get("batch_get_issues")!;
+      const result = await handler({ issueIds: ["FOO-1"] }, extra) as { content: Array<{ text: string }> };
+      const data = parseOkResult(result) as Array<{ id: string; error?: string }>;
+
+      expect(data[0]).toMatchObject({ id: "FOO-1", error: "Network failure" });
+    });
+
+    it("captures raw non-Error throw in error field", async () => {
+      getSpy.mockRejectedValueOnce("raw error string");
+
+      const handler = tools.get("batch_get_issues")!;
+      const result = await handler({ issueIds: ["FOO-1"] }, extra) as { content: Array<{ text: string }> };
+      const data = parseOkResult(result) as Array<{ id: string; error?: string }>;
+
+      expect(data[0]).toMatchObject({ id: "FOO-1", error: "raw error string" });
+    });
+  });
+
+  describe("batch_get_comments", () => {
+    it("fetches comments for each issue and returns array", async () => {
+      const handler = tools.get("batch_get_comments")!;
+      const result = await handler({ issueIds: ["FOO-1", "FOO-2"], limit: 42 }, extra) as { content: Array<{ text: string }> };
+      const data = parseOkResult(result) as Array<{ id: string; comments: unknown }>;
+      expect(data).toHaveLength(2);
+      expect(data[0].id).toBe("FOO-1");
+      expect(data[1].id).toBe("FOO-2");
+      expect(getSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("calls correct path with default fields and limit", async () => {
+      const handler = tools.get("batch_get_comments")!;
+      await handler({ issueIds: ["FOO-1"], limit: 42 }, extra);
+      expect(getSpy).toHaveBeenCalledWith(
+        "/issues/FOO-1/comments",
+        { fields: F.COMMENT, $top: 42, $skip: 0 },
+        undefined,
+        extra.signal,
+      );
+    });
+
+    it("isolates failures per issue", async () => {
+      const { YouTrackError } = await import("../../errors.js");
+      getSpy.mockResolvedValueOnce([{ id: "c1" }]);
+      getSpy.mockRejectedValueOnce(new YouTrackError("Forbidden", 403, false));
+
+      const handler = tools.get("batch_get_comments")!;
+      const result = await handler({ issueIds: ["FOO-1", "FOO-2"], limit: 42 }, extra) as { content: Array<{ text: string }> };
+      const data = parseOkResult(result) as Array<{ id: string; comments?: unknown; error?: string }>;
+
+      expect(data[0]).toMatchObject({ id: "FOO-1", comments: [{ id: "c1" }] });
+      expect(data[1]).toMatchObject({ id: "FOO-2", error: expect.stringContaining("[YouTrack 403]") });
+    });
+
+    it("captures generic Error message in error field", async () => {
+      getSpy.mockRejectedValueOnce(new Error("Timeout"));
+
+      const handler = tools.get("batch_get_comments")!;
+      const result = await handler({ issueIds: ["FOO-1"], limit: 42 }, extra) as { content: Array<{ text: string }> };
+      const data = parseOkResult(result) as Array<{ id: string; error?: string }>;
+
+      expect(data[0]).toMatchObject({ id: "FOO-1", error: "Timeout" });
+    });
+
+    it("captures raw non-Error throw in error field", async () => {
+      getSpy.mockRejectedValueOnce("raw error string");
+
+      const handler = tools.get("batch_get_comments")!;
+      const result = await handler({ issueIds: ["FOO-1"], limit: 42 }, extra) as { content: Array<{ text: string }> };
+      const data = parseOkResult(result) as Array<{ id: string; error?: string }>;
+
+      expect(data[0]).toMatchObject({ id: "FOO-1", error: "raw error string" });
+    });
+  });
+
+  describe("batch_get_activities", () => {
+    it("fetches activities for each issue and returns array", async () => {
+      const handler = tools.get("batch_get_activities")!;
+      const result = await handler({ issueIds: ["FOO-1"], limit: 42 }, extra) as { content: Array<{ text: string }> };
+      const data = parseOkResult(result) as Array<{ id: string; activities: unknown }>;
+      expect(data).toHaveLength(1);
+      expect(data[0].id).toBe("FOO-1");
+    });
+
+    it("calls correct path with ACTIVITY fields", async () => {
+      const handler = tools.get("batch_get_activities")!;
+      await handler({ issueIds: ["FOO-1"], limit: 42 }, extra);
+      expect(getSpy).toHaveBeenCalledWith(
+        "/issues/FOO-1/activities",
+        { fields: F.ACTIVITY, $top: 42, $skip: 0 },
+        undefined,
+        extra.signal,
+      );
+    });
+
+    it("includes categories filter when provided", async () => {
+      const handler = tools.get("batch_get_activities")!;
+      await handler({ issueIds: ["FOO-1"], categories: "CommentsCategory", limit: 42 }, extra);
+      expect(getSpy).toHaveBeenCalledWith(
+        "/issues/FOO-1/activities",
+        expect.objectContaining({ categories: "CommentsCategory" }),
+        undefined,
+        extra.signal,
+      );
+    });
+
+    it("isolates failures per issue", async () => {
+      const { YouTrackError } = await import("../../errors.js");
+      getSpy.mockResolvedValueOnce([{ id: "a1" }]);
+      getSpy.mockRejectedValueOnce(new YouTrackError("Not found", 404, false));
+
+      const handler = tools.get("batch_get_activities")!;
+      const result = await handler({ issueIds: ["FOO-1", "FOO-2"], limit: 42 }, extra) as { content: Array<{ text: string }> };
+      const data = parseOkResult(result) as Array<{ id: string; activities?: unknown; error?: string }>;
+
+      expect(data[0]).toMatchObject({ id: "FOO-1", activities: [{ id: "a1" }] });
+      expect(data[1]).toMatchObject({ id: "FOO-2", error: expect.stringContaining("[YouTrack 404]") });
+    });
+
+    it("captures generic Error message in error field", async () => {
+      getSpy.mockRejectedValueOnce(new Error("Connection reset"));
+
+      const handler = tools.get("batch_get_activities")!;
+      const result = await handler({ issueIds: ["FOO-1"], limit: 42 }, extra) as { content: Array<{ text: string }> };
+      const data = parseOkResult(result) as Array<{ id: string; error?: string }>;
+
+      expect(data[0]).toMatchObject({ id: "FOO-1", error: "Connection reset" });
+    });
+
+    it("captures raw non-Error throw in error field", async () => {
+      getSpy.mockRejectedValueOnce("raw error string");
+
+      const handler = tools.get("batch_get_activities")!;
+      const result = await handler({ issueIds: ["FOO-1"], limit: 42 }, extra) as { content: Array<{ text: string }> };
+      const data = parseOkResult(result) as Array<{ id: string; error?: string }>;
+
+      expect(data[0]).toMatchObject({ id: "FOO-1", error: "raw error string" });
     });
   });
 });

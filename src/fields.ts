@@ -200,3 +200,21 @@ export const BUNDLE_VALUE =
   "id,name,localizedName,description," +
   "isResolved,archived,ordinal," +
   "color(id,background,foreground)";
+
+// ─── Articles (Knowledge Base) ─────────────────────────────────────────────
+// /api/articles — YouTrack knowledge base
+export const ARTICLE_LIST =
+  "id,idReadable,summary,created,updated," +
+  "reporter(id,login,fullName)," +
+  "project(id,name,shortName)," +
+  "parentArticle(id,idReadable,summary)";
+
+export const ARTICLE_DETAIL =
+  "id,idReadable,summary,content,created,updated," +
+  "reporter(id,login,fullName),updatedBy(id,login,fullName)," +
+  "project(id,name,shortName)," +
+  "parentArticle(id,idReadable,summary)," +
+  "childArticles(id,idReadable,summary)," +
+  "tags(id,name)," +
+  "attachments(id,name,mimeType,size,url,thumbnailURL)," +
+  "visibility(permittedGroups(id,name),permittedUsers(id,login,fullName))";

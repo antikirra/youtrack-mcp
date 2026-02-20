@@ -6,6 +6,7 @@ import { createClient, type YouTrackClient } from "./client.js";
 import { registerPrompts } from "./prompts.js";
 import { registerResources } from "./resources.js";
 import { registerAgileTools } from "./tools/agile.js";
+import { registerArticleTools } from "./tools/articles.js";
 import { registerImageTools } from "./tools/images.js";
 import { registerInspectTools } from "./tools/inspect.js";
 import { registerIssueTools } from "./tools/issues.js";
@@ -75,6 +76,7 @@ registerAgileTools(server, client);
 registerUserTools(server, client);
 registerInspectTools(server, client);
 registerImageTools(server, client);
+registerArticleTools(server, client);
 registerResources(server, client);
 registerPrompts(server, client);
 
